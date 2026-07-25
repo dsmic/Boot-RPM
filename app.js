@@ -5,9 +5,12 @@ const levelDisplay = document.getElementById("level");
 
 let audioContext;
 let analyser;
-let audioBuffer;
+let buffer;
 
 let envelope = [];
+
+const RMS_WINDOW = 480; // ca. 10ms bei 48kHz
+let rmsBuffer = [];
 
 startButton.onclick = async () => {
 
@@ -24,84 +27,79 @@ startButton.onclick = async () => {
     const source =
         audioContext.createMediaStreamSource(stream);
 
-    analyser =
-        audioContext.createAnalyser();
+    analyser = audioContext.createAnalyser();
 
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0;
 
     source.connect(analyser);
 
-    audioBuffer =
-        new Float32Array(analyser.fftSize);
+    buffer = new Float32Array(analyser.fftSize);
 
     update();
 };
 
 
-
 function update() {
 
-    analyser.getFloatTimeDomainData(audioBuffer);
+    analyser.getFloatTimeDomainData(buffer);
 
 
-    // -------------------------
-    // Lautstärke dieses Blocks
-    // -------------------------
+    // Pegelanzeige
 
-    let sum = 0;
+    let rms = 0;
 
-    for (let i = 0; i < audioBuffer.length; i++) {
-        sum += audioBuffer[i] * audioBuffer[i];
+    for (let x of buffer)
+        rms += x*x;
+
+    rms = Math.sqrt(rms / buffer.length);
+
+    levelDisplay.value = Math.min(rms * 10, 1);
+
+
+
+    // Samples sammeln für RMS-Fenster
+
+    for (let x of buffer) {
+
+        rmsBuffer.push(x*x);
+
+        if (rmsBuffer.length >= RMS_WINDOW) {
+
+            let sum = 0;
+
+            for (let v of rmsBuffer)
+                sum += v;
+
+            let envelopeValue =
+                Math.sqrt(sum / rmsBuffer.length);
+
+            envelope.push(envelopeValue);
+
+            rmsBuffer = [];
+
+            // ca. 3 Sekunden Historie
+            if (envelope.length > 300)
+                envelope.shift();
+        }
     }
 
-    let rms =
-        Math.sqrt(sum / audioBuffer.length);
 
+    if (envelope.length >= 200) {
 
-    levelDisplay.value =
-        Math.min(rms * 10, 1);
-
-
-
-    // Hüllkurve sammeln
-
-    envelope.push(rms);
-
-
-    // ca. letzte 2 Sekunden behalten
-
-    if (envelope.length > 100) {
-        envelope.shift();
-    }
-
-
-
-    // genug Daten?
-
-    if (envelope.length === 100) {
-
-        let freq =
-            findEnvelopeFrequency(
+        let result =
+            autocorrelationFrequency(
                 envelope,
-                audioContext.sampleRate /
-                analyser.fftSize
+                100
             );
 
-
-        if (freq) {
+        if (result) {
 
             freqDisplay.textContent =
-                freq.toFixed(2) + " Hz";
-
-
-            // Mercury 3.5 4-Takt
-            let rpm =
-                freq * 120;
-
+                result.toFixed(2) + " Hz";
 
             rpmDisplay.textContent =
-                Math.round(rpm) + " rpm";
+                Math.round(result * 120) + " rpm";
         }
     }
 
@@ -111,78 +109,66 @@ function update() {
 
 
 
+function autocorrelationFrequency(signal, sampleRate) {
 
-
-function findEnvelopeFrequency(signal, sampleRate) {
-
-
-    const n = signal.length;
+    let n = signal.length;
 
 
     // Mittelwert entfernen
 
-    let mean = 0;
-
-    for (let x of signal)
-        mean += x;
-
-    mean /= n;
-
+    let mean =
+        signal.reduce((a,b)=>a+b,0)/n;
 
     let x =
-        signal.map(v => v - mean);
+        signal.map(v=>v-mean);
 
 
 
-    /*
-       Erwartungsbereich:
+    // Frequenzbereich 5-100 Hz
 
-       5 Hz ... 100 Hz
+    let minLag =
+        Math.floor(sampleRate / 100);
 
-       Bei envelope samplerate:
-       ca. 48000/2048 = 23.4 Hz
-
-       Dafür brauchen wir längere Historie.
-    */
+    let maxLag =
+        Math.floor(sampleRate / 5);
 
 
     let bestLag = 0;
-    let best = -1;
+    let bestCorr = -Infinity;
 
 
-    for (let lag = 2;
-         lag < n / 2;
+    for (let lag=minLag;
+         lag<=maxLag;
          lag++) {
 
+        let corr=0;
+        let e1=0;
+        let e2=0;
 
-        let corr = 0;
 
-
-        for (let i = 0;
-             i < n - lag;
+        for (let i=0;
+             i<n-lag;
              i++) {
 
-            corr +=
-                x[i] *
-                x[i + lag];
+            corr += x[i]*x[i+lag];
+            e1 += x[i]*x[i];
+            e2 += x[i+lag]*x[i+lag];
         }
 
 
-        if (corr > best) {
+        corr /= Math.sqrt(e1*e2)+1e-12;
 
-            best = corr;
+
+        if (corr > bestCorr) {
+            bestCorr = corr;
             bestLag = lag;
         }
     }
 
 
-    if (bestLag === 0)
+    if (bestCorr < 0.2)
         return null;
 
 
-    let freq =
-        sampleRate / bestLag;
-
-
-    return freq;
+    return sampleRate / bestLag;
 }
