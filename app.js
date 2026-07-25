@@ -1,92 +1,108 @@
+const startButton = document.getElementById("start");
+const rpmDisplay = document.getElementById("rpm");
+const freqDisplay = document.getElementById("freq");
+const levelDisplay = document.getElementById("level");
+
 let audioContext;
 let analyser;
-let data;
+let audioBuffer;
 
-const startButton =
-document.getElementById("start");
-
-const rpmDisplay =
-document.getElementById("rpm");
-
-const freqDisplay =
-document.getElementById("freq");
-
-const levelDisplay =
-document.getElementById("level");
-
+let envelope = [];
 
 startButton.onclick = async () => {
 
-    const stream =
-    await navigator.mediaDevices.getUserMedia({
-        audio:true
+    const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+        }
     });
 
-    audioContext =
-    new AudioContext();
+    audioContext = new AudioContext();
 
     const source =
-    audioContext.createMediaStreamSource(stream);
+        audioContext.createMediaStreamSource(stream);
 
     analyser =
-    audioContext.createAnalyser();
+        audioContext.createAnalyser();
 
-    analyser.fftSize = 8192;
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0;
 
     source.connect(analyser);
 
-    data =
-    new Float32Array(analyser.fftSize);
+    audioBuffer =
+        new Float32Array(analyser.fftSize);
 
     update();
-
 };
 
 
-function update(){
 
-    analyser.getFloatTimeDomainData(data);
+function update() {
+
+    analyser.getFloatTimeDomainData(audioBuffer);
 
 
-    // Pegel messen
+    // -------------------------
+    // Lautstärke dieses Blocks
+    // -------------------------
 
-    let sum=0;
+    let sum = 0;
 
-    for(let x of data){
-        sum += x*x;
+    for (let i = 0; i < audioBuffer.length; i++) {
+        sum += audioBuffer[i] * audioBuffer[i];
     }
 
     let rms =
-    Math.sqrt(sum/data.length);
+        Math.sqrt(sum / audioBuffer.length);
+
 
     levelDisplay.value =
-    Math.min(rms*5,1);
+        Math.min(rms * 10, 1);
 
 
 
-    // Frequenz bestimmen
+    // Hüllkurve sammeln
 
-    let frequency =
-    autoCorrelate(
-        data,
-        audioContext.sampleRate
-    );
+    envelope.push(rms);
 
 
-    if(frequency){
+    // ca. letzte 2 Sekunden behalten
 
-        freqDisplay.textContent =
-        frequency.toFixed(1)+" Hz";
-
-
-        // Mercury 3.5 4T
-        let rpm =
-        frequency * 120;
+    if (envelope.length > 100) {
+        envelope.shift();
+    }
 
 
-        rpmDisplay.textContent =
-        Math.round(rpm)+" rpm";
 
+    // genug Daten?
+
+    if (envelope.length === 100) {
+
+        let freq =
+            findEnvelopeFrequency(
+                envelope,
+                audioContext.sampleRate /
+                analyser.fftSize
+            );
+
+
+        if (freq) {
+
+            freqDisplay.textContent =
+                freq.toFixed(2) + " Hz";
+
+
+            // Mercury 3.5 4-Takt
+            let rpm =
+                freq * 120;
+
+
+            rpmDisplay.textContent =
+                Math.round(rpm) + " rpm";
+        }
     }
 
 
@@ -95,63 +111,78 @@ function update(){
 
 
 
-function autoCorrelate(buffer, sampleRate){
 
-    let SIZE = buffer.length;
 
-    let rms=0;
+function findEnvelopeFrequency(signal, sampleRate) {
 
-    for(let i=0;i<SIZE;i++){
-        rms += buffer[i]*buffer[i];
+
+    const n = signal.length;
+
+
+    // Mittelwert entfernen
+
+    let mean = 0;
+
+    for (let x of signal)
+        mean += x;
+
+    mean /= n;
+
+
+    let x =
+        signal.map(v => v - mean);
+
+
+
+    /*
+       Erwartungsbereich:
+
+       5 Hz ... 100 Hz
+
+       Bei envelope samplerate:
+       ca. 48000/2048 = 23.4 Hz
+
+       Dafür brauchen wir längere Historie.
+    */
+
+
+    let bestLag = 0;
+    let best = -1;
+
+
+    for (let lag = 2;
+         lag < n / 2;
+         lag++) {
+
+
+        let corr = 0;
+
+
+        for (let i = 0;
+             i < n - lag;
+             i++) {
+
+            corr +=
+                x[i] *
+                x[i + lag];
+        }
+
+
+        if (corr > best) {
+
+            best = corr;
+            bestLag = lag;
+        }
     }
 
-    rms=Math.sqrt(rms/SIZE);
 
-
-    if(rms<0.01)
+    if (bestLag === 0)
         return null;
 
 
-    let bestOffset=-1;
-    let bestCorrelation=0;
+    let freq =
+        sampleRate / bestLag;
 
 
-    for(let offset=20;
-        offset<1000;
-        offset++){
-
-        let correlation=0;
-
-        for(let i=0;
-            i<SIZE-offset;
-            i++){
-
-            correlation +=
-            buffer[i] *
-            buffer[i+offset];
-        }
-
-
-        correlation /= SIZE;
-
-
-        if(correlation>bestCorrelation){
-
-            bestCorrelation =
-            correlation;
-
-            bestOffset =
-            offset;
-        }
-    }
-
-
-    if(bestCorrelation>0.01){
-
-        return sampleRate /
-        bestOffset;
-    }
-
-
-    return null;
+    return freq;
 }
