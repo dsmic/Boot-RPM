@@ -8,7 +8,7 @@ let analyser;
 let buffer;
 
 let envelope = [];
-
+alert("Version 0.3 läuft");
 const RMS_WINDOW = 480; // ca. 10ms bei 48kHz
 let rmsBuffer = [];
 
