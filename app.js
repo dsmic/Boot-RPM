@@ -8,7 +8,7 @@ let analyser;
 let buffer;
 
 let envelope = [];
-alert("Version 0.4 läuft");
+alert("Version 0.5 läuft");
 const RMS_WINDOW = 480; // ca. 10ms bei 48kHz
 let rmsBuffer = [];
 
@@ -29,8 +29,8 @@ startButton.onclick = async () => {
 
     analyser = audioContext.createAnalyser();
 
-    analyser.fftSize = 20480;
-    analyser.smoothingTimeConstant = 10;
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 1;
 
     source.connect(analyser);
 
