@@ -265,3 +265,11 @@ registerProcessor("engine-envelope-processor", EngineEnvelopeProcessor);
 
   return URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
 }
+
+if ("serviceWorker" in navigator) {
+
+    navigator.serviceWorker.register(
+        "./service-worker.js"
+    );
+
+}
