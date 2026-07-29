@@ -1,4 +1,4 @@
-const CACHE = "rpm-v1";
+const CACHE = "rpm-v2";
 
 const FILES = [
     "./",
